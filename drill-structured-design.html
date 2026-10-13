@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>变换型 DFD→模块 · 递进练习</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Serif+SC:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css?v=20260820c" />
+  <style>
+    .drill-wrap { max-width: 820px; margin: 0 auto; padding: 20px 16px 48px; }
+    .drill-top { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .drill-top h1 { font-family: "Noto Serif SC", serif; font-size: 24px; margin: 0; }
+    .level-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
+    .level-chip {
+      border: 1px solid var(--line); background: var(--sheet); padding: 6px 12px; border-radius: 999px;
+      font-size: 13px; color: var(--muted);
+    }
+    .level-chip.on { border-color: var(--steel); color: var(--steel); font-weight: 600; background: #eef5fb; }
+    .level-chip.done { border-color: var(--ok); color: var(--ok); }
+    .card {
+      background: var(--sheet); border: 1px solid #cfd8e3; box-shadow: var(--shadow);
+      padding: 22px 24px; border-radius: 4px;
+    }
+    .meta-line { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+    .stem { white-space: pre-wrap; line-height: 1.7; font-size: 16px; margin: 0 0 16px; }
+    .field { margin: 10px 0; }
+    .field label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+    .field input, .field textarea {
+      width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 4px;
+      font: inherit; background: #fbfcfe;
+    }
+    .field textarea { min-height: 88px; resize: vertical; }
+    .opts { display: grid; gap: 8px; margin: 12px 0; }
+    .opt-btn {
+      text-align: left; padding: 12px 14px; border: 1px solid var(--line); background: #fff;
+      border-radius: 4px; font-size: 15px;
+    }
+    .opt-btn.chosen { border-color: var(--steel); background: #eef5fb; }
+    .opt-btn.ok { border-color: var(--ok); background: #e8f6ef; }
+    .opt-btn.bad { border-color: var(--bad); background: #fdeceb; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    .answer-box {
+      margin-top: 16px; padding: 14px 16px; border-left: 4px solid var(--steel);
+      background: #f3f7fb; border-radius: 0 4px 4px 0;
+    }
+    .answer-box h3 { margin: 0 0 8px; font-size: 15px; }
+    .answer-box p { margin: 0 0 6px; line-height: 1.6; }
+    .check-ok { color: var(--ok); font-weight: 600; }
+    .check-bad { color: var(--bad); font-weight: 600; }
+    .progress { font-size: 13px; color: var(--muted); }
+    .info-note { background: #fff8e8; border: 1px solid #edd9a8; padding: 12px 14px; border-radius: 4px; margin-bottom: 12px; color: #6b5420; }
+    .legend {
+      background: #f3f7fb; border: 1px solid #c5d6e8; border-radius: 4px;
+      padding: 10px 14px; margin: 0 0 14px; font-size: 13px; line-height: 1.55; color: var(--ink);
+    }
+    .legend b { color: var(--steel); }
+    .docs a { color: var(--steel); margin-right: 12px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="drill-wrap" id="app"></div>
+  <script src="data/drill-structured-design.js"></script>
+  <script>
+(function () {
+  const bank = window.STRUCTURED_DESIGN_DRILL;
+  const STORAGE_KEY = "sd-drill-progress-v1";
+  const state = {
+    index: 0,
+    reveal: false,
+    choice: null,
+    drafts: {},
+    checked: null,
+    filterLevel: "ALL"
+  };
+
+  function loadProgress() {
+    try {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+    } catch (_) {
+      return {};
+    }
+  }
+  function saveProgress(progress) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+  }
+  let progress = loadProgress();
+
+  function questions() {
+    if (state.filterLevel === "ALL") return bank.questions.slice();
+    return bank.questions.filter((q) => q.level === state.filterLevel);
+  }
+
+  function current() {
+    const list = questions();
+    if (!list.length) return null;
+    if (state.index >= list.length) state.index = list.length - 1;
+    if (state.index < 0) state.index = 0;
+    return list[state.index];
+  }
+
+  function normalize(text) {
+    return String(text || "")
+      .trim()
+      .replace(/，/g, ",")
+      .replace(/\s+/g, "")
+      .toLowerCase();
+  }
+
+  function setMatch(user, answers) {
+    const parts = normalize(user).split(",").filter(Boolean).sort();
+    return answers.some((ans) => {
+      const expected = normalize(ans).split(",").filter(Boolean).sort();
+      return expected.length === parts.length && expected.every((item, i) => item === parts[i]);
+    });
+  }
+
+  function textMatch(user, q) {
+    const n = normalize(user);
+    if (!n) return false;
+    if (q.loose) {
+      return (q.answers || []).some((ans) => n.includes(normalize(ans)) || normalize(ans).includes(n));
+    }
+    return (q.answers || []).some((ans) => normalize(ans) === n);
+  }
+
+  function grade(q) {
+    if (q.kind === "info") return null;
+    if (q.kind === "choice") {
+      return state.choice === q.answerIndex;
+    }
+    if (q.kind === "multi") {
+      return q.fields.every((field) => {
+        const val = (state.drafts[q.id] && state.drafts[q.id][field.id]) || "";
+        if (field.match === "set") return setMatch(val, field.answers);
+        return field.answers.some((ans) => normalize(ans) === normalize(val));
+      });
+    }
+    const val = (state.drafts[q.id] && state.drafts[q.id].main) || "";
+    return textMatch(val, q);
+  }
+
+  function markSeen(q, ok) {
+    progress[q.id] = { seen: true, ok: !!ok, at: Date.now() };
+    saveProgress(progress);
+  }
+
+  function esc(text) {
+    return String(text)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function render() {
+    const list = questions();
+    const q = current();
+    const levelMap = Object.fromEntries(bank.levels.map((level) => [level.id, level]));
+    const doneCount = bank.questions.filter((item) => progress[item.id] && progress[item.id].ok).length;
+
+    if (!q) {
+      document.getElementById("app").innerHTML = `<p>当前关卡没有题目。</p><a class="btn" href="index.html">返回首页</a>`;
+      return;
+    }
+
+    const draft = state.drafts[q.id] || {};
+    let body = "";
+    if (q.kind === "info") {
+      body = `<div class="info-note">说明题：阅读后点「下一题」即可。</div>`;
+    } else if (q.kind === "choice") {
+      body = `<div class="opts">${q.options.map((opt, i) => {
+        let cls = "opt-btn";
+        if (state.choice === i) cls += " chosen";
+        if (state.reveal) {
+          if (i === q.answerIndex) cls += " ok";
+          else if (state.choice === i) cls += " bad";
+        }
+        return `<button type="button" class="${cls}" data-choice="${i}">${String.fromCharCode(65 + i)}. ${esc(opt)}</button>`;
+      }).join("")}</div>`;
+    } else if (q.kind === "multi") {
+      body = q.fields.map((field) => `
+        <div class="field">
+          <label for="f-${field.id}">${esc(field.label)}</label>
+          <input id="f-${field.id}" data-field="${esc(field.id)}" value="${esc(draft[field.id] || "")}" placeholder="填写答案" />
+        </div>`).join("");
+    } else {
+      body = `<div class="field">
+        <label for="main">你的答案</label>
+        <textarea id="main" data-field="main" placeholder="先写答案，再点查看本题答案">${esc(draft.main || "")}</textarea>
+      </div>`;
+    }
+
+    const check = state.checked;
+    const answerHtml = state.reveal ? `
+      <div class="answer-box">
+        <h3>本题参考答案</h3>
+        <p><b>${esc(q.answerShow)}</b></p>
+        <p>${esc(q.explain || "")}</p>
+        ${check === true ? `<p class="check-ok">核对本题：正确</p>` : ""}
+        ${check === false ? `<p class="check-bad">核对本题：与参考答案不一致（说明题/开放表述可对照解析自行判断）</p>` : ""}
+      </div>` : "";
+
+    document.getElementById("app").innerHTML = `
+      <div class="drill-top">
+        <div>
+          <a href="index.html" style="color:var(--steel);font-size:13px;text-decoration:none">← 返回机考首页</a>
+          <h1>${esc(bank.title)}</h1>
+          <p class="progress">${esc(bank.subtitle)}　已掌握 ${doneCount}/${bank.questions.length}</p>
+          <div class="docs">${bank.docs.map((doc) => `<a href="${esc(doc.href)}" target="_blank" rel="noopener">${esc(doc.label)}</a>`).join("")}</div>
+        </div>
+        <a class="btn ghost" href="index.html#pm" data-act="home">应用技术列表</a>
+      </div>
+      <div class="legend">
+        <b>P</b> = 加工（填集合）　　
+        <b>F</b> = 数据流（作边界，不进集合）　　
+        <b>E</b> = 外部实体　　<b>M</b> = 模块　　
+        口诀：边界用 F 下刀，集合里只收 P。　　
+        归属：<b>交出</b>输出边界流的 P → 中心；<b>接住</b>的 P → 输出（故 F5 为 P4→P5 时，P4 在中心、P5 在输出）。
+      </div>
+      <div class="level-row">
+        <button type="button" class="level-chip ${state.filterLevel === "ALL" ? "on" : ""}" data-level="ALL">全部</button>
+        ${bank.levels.map((level) => {
+          const ids = bank.questions.filter((item) => item.level === level.id).map((item) => item.id);
+          const allDone = ids.every((id) => progress[id] && progress[id].ok);
+          return `<button type="button" class="level-chip ${state.filterLevel === level.id ? "on" : ""} ${allDone ? "done" : ""}" data-level="${level.id}">${level.id} ${esc(level.title)}</button>`;
+        }).join("")}
+      </div>
+      <div class="card">
+        <div class="meta-line">关卡 ${esc(q.level)} · ${esc((levelMap[q.level] || {}).title || "")} · 第 ${state.index + 1}/${list.length} 题 · ${esc(q.id)}</div>
+        <div class="stem">${esc(q.stem)}</div>
+        ${body}
+        <div class="toolbar">
+          <button type="button" class="btn ghost" data-act="prev" ${state.index <= 0 ? "disabled" : ""}>上一题</button>
+          <button type="button" class="btn" data-act="reveal">${state.reveal ? "隐藏本题答案" : "查看本题答案"}</button>
+          ${q.kind === "info" ? "" : `<button type="button" class="btn ghost" data-act="check">核对本题</button>`}
+          <button type="button" class="btn ghost" data-act="next">${state.index >= list.length - 1 ? "本关最后一题" : "下一题"}</button>
+        </div>
+        ${answerHtml}
+      </div>
+      <p class="note" style="margin-top:14px">答案默认隐藏。每题独立查看，不会把整册答案一次性摊开。做完 F 关后，可回首页打开「设备用电报告：从变换型DFD到模块结构」。</p>
+    `;
+  }
+
+  function readDrafts(q) {
+    if (!q || q.kind === "choice" || q.kind === "info") return;
+    state.drafts[q.id] = state.drafts[q.id] || {};
+    document.querySelectorAll("[data-field]").forEach((el) => {
+      state.drafts[q.id][el.getAttribute("data-field")] = el.value;
+    });
+  }
+
+  document.getElementById("app").addEventListener("click", (event) => {
+    const q = current();
+    const levelBtn = event.target.closest("[data-level]");
+    if (levelBtn) {
+      readDrafts(q);
+      state.filterLevel = levelBtn.getAttribute("data-level");
+      state.index = 0;
+      state.reveal = false;
+      state.choice = null;
+      state.checked = null;
+      render();
+      return;
+    }
+    const choiceBtn = event.target.closest("[data-choice]");
+    if (choiceBtn) {
+      state.choice = Number(choiceBtn.getAttribute("data-choice"));
+      state.checked = null;
+      render();
+      return;
+    }
+    const actBtn = event.target.closest("[data-act]");
+    if (!actBtn) return;
+    const act = actBtn.getAttribute("data-act");
+    readDrafts(q);
+    if (act === "prev") {
+      state.index -= 1;
+      state.reveal = false;
+      state.choice = null;
+      state.checked = null;
+    } else if (act === "next") {
+      const list = questions();
+      if (state.index < list.length - 1) {
+        state.index += 1;
+        state.reveal = false;
+        state.choice = null;
+        state.checked = null;
+      }
+    } else if (act === "reveal") {
+      state.reveal = !state.reveal;
+      if (state.reveal && q && q.kind !== "info") {
+        const ok = grade(q);
+        if (ok) markSeen(q, true);
+        else if (progress[q.id] == null) markSeen(q, false);
+      }
+    } else if (act === "check") {
+      state.reveal = true;
+      const ok = grade(q);
+      state.checked = ok;
+      if (ok != null) markSeen(q, ok);
+    }
+    render();
+  });
+
+  document.getElementById("app").addEventListener("input", (event) => {
+    const field = event.target.getAttribute("data-field");
+    if (!field) return;
+    const q = current();
+    if (!q) return;
+    state.drafts[q.id] = state.drafts[q.id] || {};
+    state.drafts[q.id][field] = event.target.value;
+    state.checked = null;
+  });
+
+  render();
+})();
+  </script>
+</body>
+</html>
